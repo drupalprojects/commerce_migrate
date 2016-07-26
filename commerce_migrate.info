@@ -2,9 +2,16 @@ name = Commerce Migrate
 description = Provides Commerce-specific Migrate handlers.
 core = 7.x
 package = Commerce (contrib)
+
 dependencies[] = migrate
 dependencies[] = migrate_extras
+dependencies[] = commerce
 dependencies[] = commerce_product
+
+test_dependencies[] = views
+test_dependencies[] = rules
+test_dependencies[] = addressfield
+test_dependencies[] = commerce_shipping
 
 ; Destination plugins
 files[] = plugins/destinations/commerce_license.inc
