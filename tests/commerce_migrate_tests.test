@@ -1,0 +1,132 @@
+<?php
+/**
+ * @file
+ * Tests of "Commerce Migrate".
+ */
+
+/**
+ * Class CommerceMigrateTestCase.
+ */
+class CommerceMigrateTestCase extends CommerceMigrateBaseTestCase {
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function getInfo() {
+    return array(
+      'name' => t('Commerce Migrate'),
+      'group' => 'Commerce Migrate',
+      'description' => t('Import products, product displays, line items and orders.'),
+      'dependencies' => array('commerce_shipping'),
+    );
+  }
+
+  /**
+   * Tests integrity of an order.
+   *
+   * @param string $order_number
+   *   Order number.
+   */
+  public function testOrder($order_number = 'EXAMPLE-ORDER-1') {
+    $order = $this->getOrder($order_number);
+    $raw_order = $this->getOrdersCsvItem($order_number);
+
+    $line_items = array(
+      'products' => array(),
+      'shipping' => array(),
+    );
+
+    $amount = array(
+      'total' => array(
+        'products' => 0,
+        'shipping' => 0,
+      ),
+      'expected' => array(
+        'products' => 0,
+        'shipping' => 0,
+      ),
+    );
+
+    foreach ($order->commerce_line_items as $line_item_wrapper) {
+      if (isset($line_item_wrapper->commerce_product)) {
+        $raw_product = $this->getProductsCsvItem($line_item_wrapper->commerce_product->sku->value());
+
+        $line_items['products'][] = $line_item_wrapper;
+        $amount['total']['products'] += $line_item_wrapper->commerce_total->amount->value();
+        $amount['expected']['products'] += $line_item_wrapper->quantity->value() * commerce_currency_decimal_to_amount($raw_product->price, $raw_product->currency_code);
+      }
+
+      if ('shipping' === $line_item_wrapper->type->value()) {
+        $line_items['shipping'][] = $line_item_wrapper;
+        $amount['total']['shipping'] += $line_item_wrapper->commerce_total->amount->value();
+      }
+    }
+
+    // We migrate line items of two types: "product" and "shipping". So,
+    // to get the total price of "shipping" line items, we need subtract
+    // products cost from total cost.
+    $amount['expected']['shipping'] += $order->commerce_order_total->amount->value() - $amount['total']['products'];
+
+    // Check that expected prices are equal to what we have.
+    foreach (array_keys($line_items) as $item) {
+      $this->assertEqual($amount['total'][$item], $amount['expected'][$item], "$item prices are correct.");
+    }
+
+    foreach (array('mail', 'status', 'hostname') as $item) {
+      $this->assertIdentical($raw_order->{$item}, $order->{$item}->value(), "An order has correct $item.");
+    }
+  }
+
+  /**
+   * Tests integrity of a product.
+   *
+   * @param string $sku
+   *   Product SKU.
+   */
+  public function testProduct($sku = '64671631') {
+    $product = $this->getProduct($sku);
+    $raw_product = $this->getProductsCsvItem($sku);
+
+    $this->assertIdentical(
+      $raw_product->title,
+      $product->title->value(),
+      'Product title is correct.'
+    );
+
+    $this->assertEqual(
+      commerce_currency_decimal_to_amount($raw_product->price, $raw_product->currency_code),
+      $product->commerce_price->amount->value(),
+      'Product amount is correct.'
+    );
+
+    $this->assertIdentical(
+      $raw_product->currency_code,
+      $product->commerce_price->currency_code->value(),
+      'Product currency code is correct.'
+    );
+  }
+
+  /**
+   * Tests of removing imported data.
+   */
+  public function testRollback() {
+    $this->migrate('rollback');
+
+    try {
+      $this->testOrder();
+      $this->fail('Order should not be loaded after rollback!');
+    }
+    catch (\Exception $e) {
+      $this->pass($e->getMessage());
+    }
+
+    try {
+      $this->testProduct();
+      $this->fail('Product should not be loaded after rollback!');
+    }
+    catch (\Exception $e) {
+      $this->pass($e->getMessage());
+    }
+  }
+
+}

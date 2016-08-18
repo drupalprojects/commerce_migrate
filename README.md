@@ -29,8 +29,36 @@ class CommerceExampleMigration extends Migration {
 
     $this->addFieldMapping('commerce_price:tax_rate', 'price_tax')
       ->description(t('The tax rate is in the "price_tax" field in the source.'));
+
+    $this->addFieldMapping('commerce_unit_price:components:shipping', 'shipping_price')
+      ->callbacks(array($this, 'priceComponentShipping'));
+  }
+
+  /**
+   * @return string|string[]|mixed
+   *   An amount, an array with "amount", "currency_code"
+   *   and "included" properties (required only "amount"),
+   *   or any non-numeric value for skipping the component.
+   */
+  protected function priceComponentShipping($amount) {
+    return $amount > 0 ? $amount : FALSE;
   }
 }
+```
+
+## Testing
+
+```shell
+php scripts/run-tests.sh --verbose "Commerce Migrate"
+```
+
+To see imported data on existing site, you should:
+
+```shell
+drush si minimal -y
+drush en commerce_order commerce_product_reference commerce_shipping commerce_migrate_example -y
+drush mreg
+drush migrate-import --group=commerce_example
 ```
 
 ## Resources
@@ -40,4 +68,3 @@ The Migrate handbook page at https://www.drupal.org/node/415260
 - http://cyrve.com/import
 - http://www.gizra.com/content/data-migration-part-1
 - http://www.gizra.com/content/data-migration-part-2
-

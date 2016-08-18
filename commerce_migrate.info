@@ -13,11 +13,11 @@ test_dependencies[] = rules
 test_dependencies[] = addressfield
 test_dependencies[] = commerce_shipping
 
-; Destination plugins
+; Destination plugins.
 files[] = plugins/destinations/commerce_license.inc
 files[] = plugins/destinations/commerce_product_type.inc
 files[] = plugins/destinations/commerce_product.inc
 files[] = plugins/destinations/fields.inc
 
-files[] = tests/base.test
-files[] = tests/destinations/product.test
+files[] = tests/commerce_migrate_base.test
+files[] = tests/commerce_migrate_tests.test

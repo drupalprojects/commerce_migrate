@@ -1,0 +1,275 @@
+<?php
+/**
+ * @file
+ * Base facade for "Commerce Migrate" tests.
+ */
+
+/**
+ * Class CommerceMigrateBaseTestCase.
+ */
+abstract class CommerceMigrateBaseTestCase extends CommerceBaseTestCase {
+
+  /**
+   * Content of CSV files.
+   *
+   * @var array[]
+   */
+  private $csvFiles = array();
+  /**
+   * User object of a store administrator.
+   *
+   * @var \stdClass
+   */
+  private $storeAdmin;
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function setUp() {
+    parent::setUp(parent::setUpHelper('all', static::extraModules()));
+    // Make sure the migrations are registered.
+    migrate_static_registration();
+    // Run all test imports.
+    $this->migrate('import');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function permissionBuilder($set) {
+    $permissions = parent::permissionBuilder($set);
+
+    switch ($set) {
+      case 'store admin':
+      case 'site admin':
+        $permissions[] = MIGRATE_ACCESS_BASIC;
+        $permissions[] = MIGRATE_ACCESS_ADVANCED;
+        break;
+    }
+
+    return $permissions;
+  }
+
+  /**
+   * Returns list of additional modules for enable before test will be run.
+   *
+   * @return string[]
+   *   List of module names.
+   *
+   * @throws \Exception
+   */
+  protected static function extraModules() {
+    $test_class = get_called_class();
+
+    if (!method_exists($test_class, 'getInfo')) {
+      throw new \Exception(format_string('The "@method" is not implemented by "@test_class" test class!', array(
+        '@method' => __METHOD__,
+        '@test_class' => $test_class,
+      )));
+    }
+
+    $info = $test_class::getInfo();
+    $modules = array(
+      'migrate',
+      'migrate_extras',
+      'commerce_migrate',
+      'commerce_migrate_example',
+    );
+
+    // Prepend test dependencies.
+    if (!empty($info['dependencies'])) {
+      $modules = array_merge($modules, $info['dependencies']);
+    }
+
+    return $modules;
+  }
+
+  /**
+   * Get user object of a store administrator.
+   *
+   * @return \stdClass
+   *   Drupal user.
+   */
+  protected function getStoreAdmin() {
+    if (NULL === $this->storeAdmin) {
+      $this->storeAdmin = $this->createStoreAdmin();
+
+      if (FALSE === $this->storeAdmin) {
+        $this->fail('Failed to create Store Admin user for test.');
+      }
+    }
+
+    return $this->storeAdmin;
+  }
+
+  /**
+   * Load an order by number.
+   *
+   * @see commerce_order_load_by_number()
+   *
+   * @param string $order_number
+   *   Order number. See "orders.csv".
+   *
+   * @return \EntityDrupalWrapper
+   *   Entity wrapper for commerce order.
+   */
+  protected function getOrder($order_number) {
+    return $this->getEntityWrapper('commerce_order', 'order_number', $order_number);
+  }
+
+  /**
+   * Returns raw data of an order from CSV file.
+   *
+   * @param string $order_number
+   *   Order number. See "orders.csv".
+   *
+   * @return \stdClass
+   *   Raw data of an order from CSV file.
+   */
+  protected function getOrdersCsvItem($order_number) {
+    return $this->readCsv('CommerceMigrateExampleOrdersCsv', $order_number);
+  }
+
+  /**
+   * Load product by SKU.
+   *
+   * @see commerce_product_load_by_sku()
+   *
+   * @param string $sku
+   *   Product SKU. See "products.csv".
+   *
+   * @return \EntityDrupalWrapper
+   *   Entity wrapper for commerce product.
+   */
+  protected function getProduct($sku) {
+    return $this->getEntityWrapper('commerce_product', 'sku', $sku);
+  }
+
+  /**
+   * Returns raw data of a product from CSV file.
+   *
+   * @param string $sku
+   *   Product SKU. See "products.csv".
+   *
+   * @return \stdClass
+   *   Raw data of a product from CSV file.
+   */
+  protected function getProductsCsvItem($sku) {
+    $item = $this->readCsv('CommerceMigrateExampleProductsCsv', $sku);
+
+    if (empty($item->currency_code)) {
+      $item->currency_code = commerce_default_currency();
+    }
+
+    return $item;
+  }
+
+  /**
+   * Performs migration action.
+   *
+   * @see \MigrationBase::processImport()
+   * @see \MigrationBase::processRollback()
+   *
+   * @param string $action
+   *   One of two possible actions: "import" or "rollback".
+   *
+   * @throws \Exception
+   */
+  protected function migrate($action) {
+    $action = ucfirst($action);
+    $method = "process$action";
+
+    if (!method_exists('MigrationBase', $method)) {
+      throw new \Exception(format_string('Wrong action! Read documentation for "@method" method!', array(
+        '@method' => __METHOD__,
+      )));
+    }
+
+    $info = module_invoke('commerce_migrate_example', 'migrate_api');
+
+    // Rollback should be in a reverse order.
+    if ('Rollback' === $action) {
+      $info['migrations'] = array_reverse($info['migrations']);
+    }
+
+    foreach ($info['migrations'] as $migration => $definition) {
+      $this->assertEqual(
+        \Migration::getInstance($migration)->{$method}(),
+        \Migration::RESULT_COMPLETED,
+        format_string('@action of "@migration" completed.', array(
+          '@action' => $action,
+          '@migration' => $migration,
+        ))
+      );
+    }
+  }
+
+  /**
+   * Returns data from one of CSV files.
+   *
+   * @param string|\CommerceMigrateExampleMigration $class_name
+   *   The name of object which represents CSV file.
+   * @param string $primary_key
+   *   One of values from the first column in CSV.
+   *
+   * @return \stdClass
+   *   Row from CSV.
+   */
+  private function readCsv($class_name, $primary_key) {
+    if (!isset($this->csvFiles[$class_name][$primary_key])) {
+      $file_object = new \SplFileObject(drupal_get_path('module', 'commerce_migrate_example') . '/files/' . $class_name::FILE);
+      $column_names = array_keys($class_name::csvColumns());
+      $column_count = count($column_names);
+
+      while ($file_object->valid()) {
+        $line = $file_object->fgetcsv();
+
+        // Empty lines.
+        if ($column_count !== count($line)) {
+          continue;
+        }
+
+        if (current($line) === $primary_key) {
+          return $this->csvFiles[$class_name][$primary_key] = (object) array_combine($column_names, $line);
+        }
+      }
+
+      throw new \RuntimeException(format_string('One of @type cannot be loaded by "@value"', array(
+        '@type' => basename($class_name::FILE),
+        '@value' => $primary_key,
+      )));
+    }
+
+    return $this->csvFiles[$class_name][$primary_key];
+  }
+
+  /**
+   * Load entity by property.
+   *
+   * @param string $entity_type
+   *   Entity type.
+   * @param string $property
+   *   Property in entity schema.
+   * @param string $value
+   *   Expected value of a property.
+   *
+   * @return \EntityDrupalWrapper|\EntityMetadataWrapper
+   *   Entity wrapper.
+   *
+   * @throws \Exception
+   */
+  private function getEntityWrapper($entity_type, $property, $value) {
+    $entity = entity_load($entity_type, FALSE, array($property => $value));
+
+    if (empty($entity)) {
+      throw new \Exception(format_string('Entity of "@entity_type" cannot be loaded using "@property" property with "@value" value.', array(
+        '@entity_type' => $entity_type,
+        '@property' => $property,
+        '@value' => $value,
+      )));
+    }
+
+    return entity_metadata_wrapper($entity_type, reset($entity));
+  }
+
+}
